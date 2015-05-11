@@ -1,0 +1,55 @@
+#!/usr/bin/python
+
+#
+# Copyright 2012 Canonical Ltd.
+#
+# Authors:
+#  Chris Holcombe <chris.holcombe@canonical.com>
+#
+from charmhelpers.core.hookenv import (
+    log,
+    DEBUG,
+    ERROR,
+    config,
+    relation_ids,
+    related_units,
+    relation_get,
+    relation_set,
+    remote_unit,
+    Hooks, UnregisteredHookError,
+    service_name,
+    relations_of_type
+)
+
+def emit_cephconf():
+    cephcontext = {
+        'auth_supported': config('auth-supported'),
+        'mon_hosts': ' '.join(get_mon_hosts()),
+        'fsid': config('fsid'),
+        'old_auth': cmp_pkgrevno('ceph', "0.51") < 0,
+        'osd_journal_size': config('osd-journal-size'),
+        'use_syslog': str(config('use-syslog')).lower(),
+        'ceph_public_network': config('ceph-public-network'),
+        'ceph_cluster_network': config('ceph-cluster-network'),
+    }
+
+    if config('prefer-ipv6'):
+        dynamic_ipv6_address = get_ipv6_addr()[0]
+        if not config('ceph-public-network'):
+            cephcontext['public_addr'] = dynamic_ipv6_address
+        if not config('ceph-cluster-network'):
+            cephcontext['cluster_addr'] = dynamic_ipv6_address
+
+    # Install ceph.conf as an alternative to support
+    # co-existence with other charms that write this file
+    charm_ceph_conf = "/var/lib/charm/{}/ceph.conf".format(service_name())
+    mkdir(os.path.dirname(charm_ceph_conf))
+    render('ceph.conf', charm_ceph_conf, cephcontext, perms=0o644)
+    install_alternative('ceph.conf', '/etc/ceph/ceph.conf',
+                        charm_ceph_conf, 100)
+
+if __name__ == '__main__':
+    try:
+        hooks.execute(sys.argv)
+    except UnregisteredHookError as e:
+        log('Unknown hook {} - skipping.'.format(e))

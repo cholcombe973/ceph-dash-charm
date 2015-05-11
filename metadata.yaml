@@ -1,0 +1,16 @@
+name: ceph-dash
+summary: A monitoring dashboard for a Ceph storage cluster
+maintainer: chris holcombe <chris@chris-ThinkPad-T410s>
+description: |
+  Ceph-dash is a new clean approach to monitoring for Ceph.  This talks directly to the Ceph cluster.
+tags:
+  - monitoring
+subordinate: false
+provides:
+  website:
+    interface: http
+requires:
+  datastore:
+    interface: sockserver
+  ceph-client:
+    interface: ceph-client
