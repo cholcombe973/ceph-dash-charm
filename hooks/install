@@ -1,1 +1,49 @@
-services.py
+#!/usr/bin/python
+import sys
+import setup
+
+setup.pre_install()
+import os
+import os.path
+import subprocess
+
+from charmhelpers.core import hookenv
+from charmhelpers import fetch
+
+
+def install():
+    hookenv.log('Installing ceph-dash')
+    hookenv.log('Installing nginx dependency')
+    fetch.apt_install(fetch.filter_installed_packages(
+        ['nginx', 'nginx-common', 'nginx-core', 'python-ceph',
+         'build-essential', 'python-dev', 'python-enum',
+         'python-netifaces', 'python-netaddr', 'ceph-common',
+         'python-dnspython', 'python-pip']))
+    fetch.add_source('ppa:xfactor973/ceph')
+    fetch.apt_update()
+
+    # Installs ceph-dash to /opt/ceph-dash
+    fetch.apt_install(fetch.filter_installed_packages(['ceph-dash']))
+    hookenv.log('Installing uwsgi dependency')
+    pip = subprocess.Popen('pip install uwsgi', shell=True)
+    pip.wait()
+
+    if not os.path.exists('/usr/local/bin/uwsgi'):
+        hookenv.log('uwsgi failed to install properly')
+        sys.exit(-1)
+
+    if not os.path.exists('/var/log/uwsgi'):
+        os.mkdir('/var/log/uwsgi')
+    else:
+        hookenv.log("/var/log/uwsgi directory exists.  Skipping creation")
+    if os.path.exists('/etc/nginx/sites-enabled/default'):
+        os.remove('/etc/nginx/sites-enabled/default')
+    else:
+        hookenv.log("default nginx file does not exist.  Skipping removal")
+    hookenv.log("Symlinking cephdash.conf to nginx for startup")
+    os.symlink('/etc/nginx/sites-available/cephdash.conf',
+               '/etc/nginx/sites-enabled/cephdash.conf')
+
+
+if __name__ == "__main__":
+    install()

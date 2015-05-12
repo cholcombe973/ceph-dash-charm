@@ -1,1 +1,26 @@
-services.py
+#!/bin/bash
+set -ex
+
+# Connect to the graphite instance
+
+INSTALL_DIR=/opt/ceph-dash/
+CFG_FILE=$INSTALL_DIR/injector.cfg
+ADDR=$('relation-get hostname')
+PORT=$('relation-get port')
+NAMESPACE="series-$ADDR"
+
+if [[ $ADDR == "" ]]; then
+    juju-log "server not ready to start"
+    exit 0
+fi
+
+if [[ $PORT == "" ]]; then
+    juju-log "server not ready to start"
+    exit 0
+fi
+
+echo "ADDR=$ADDR" > $CFG_FILE
+echo "PORT=$PORT" >> $CFG_FILE
+
+$CHARM_DIR/hooks/stop
+$CHARM_DIR/hooks/start

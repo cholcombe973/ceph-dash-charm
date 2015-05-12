@@ -1,9 +1,35 @@
 #!/usr/bin/python
+import os
 
 from charmhelpers.core.services.base import ServiceManager
 from charmhelpers.core.services import helpers
 
 import actions
+
+from charmhelpers.core.hookenv import (
+    config,
+    is_relation_made,
+    local_unit,
+    log,
+    relation_get,
+    relation_ids,
+    related_units,
+    relation_set,
+    unit_get,
+    unit_private_ip,
+    charm_name,
+    DEBUG,
+    INFO,
+    WARNING,
+    ERROR,
+)
+
+class OSContextGenerator(object):
+    """Base class for all context generators."""
+    interfaces = []
+
+    def __call__(self):
+        raise NotImplementedError
 
 class CephContext(OSContextGenerator):
     """Generates context for /etc/ceph/ceph.conf templates."""
@@ -57,6 +83,7 @@ def manage():
                 # data (contexts) required to start the service
                 # e.g.: helpers.RequiredConfig('domain', 'auth_key'),
                 #       helpers.MysqlRelation(),
+                CephContext()
             ],
             'data_ready': [
                 helpers.render_template(

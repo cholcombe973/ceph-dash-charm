@@ -12,5 +12,5 @@ provides:
 requires:
   datastore:
     interface: sockserver
-  ceph-client:
-    interface: ceph-client
+  dashboard:
+    interface: dashboard

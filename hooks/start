@@ -1,1 +1,12 @@
-services.py
+#!/bin/bash
+CFG_FILE=/etc/ceph/ceph.conf
+
+if [[ -e $CFG_FILE ]]; then
+    juju-log "Starting nginx"
+    service nginx restart
+    juju-log "Starting uwsgi which will run ceph-dash"
+    /usr/local/bin/uwsgi /opt/ceph-dash/uwsgi.ini
+else
+    juju-log "server not ready to start"
+    exit 0
+fi
