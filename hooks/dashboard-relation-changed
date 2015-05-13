@@ -6,29 +6,19 @@
 # Authors:
 # Chris Holcombe <chris.holcombe@canonical.com>
 #
-import netaddr
-import netifaces
-import socket
-import dns.resolver
-from netaddr import core
+import json
 import subprocess
 
 from charmhelpers.core.hookenv import (
     log,
-    config,
-    relation_ids,
     relation_get,
     service_name,
-    Hooks, UnregisteredHookError,
-    related_units, cached, unit_get)
+    UnregisteredHookError)
 from charmhelpers.core.host import (
     cmp_pkgrevno
 )
 from charmhelpers.core.templating import render
 from enum import Enum
-
-
-hooks = Hooks()
 
 
 class CephClientType(Enum):
@@ -52,145 +42,57 @@ class CephBucketType(Enum):
     root = 'root'
 
 
-@cached
-def get_host_ip(hostname=None):
-    hostname = hostname or unit_get('private-address')
-    try:
-        # Test to see if already an IPv4 address
-        socket.inet_aton(hostname)
-        return hostname
-    except socket.error:
-        # This may throw an NXDOMAIN exception; in which case
-        # things are badly broken so just let it kill the hook
-        answers = dns.resolver.query(hostname, 'A')
-        if answers:
-            return answers[0].address
-
-
-def _validate_cidr(network):
-    try:
-        netaddr.IPNetwork(network)
-    except (core.AddrFormatError, ValueError):
-        raise ValueError("Network (%s) is not in CIDR presentation format" %
-                         network)
-
-
-def no_ip_found_error_out(network):
-    errmsg = ("No IP address found in network: %s" % network)
-    raise ValueError(errmsg)
-
-
-def get_address_in_network(network, fallback=None, fatal=False):
-    """Get an IPv4 or IPv6 address within the network from the host.
-
-    :param network (str): CIDR presentation format. For example,
-        '192.168.1.0/24'.
-    :param fallback (str): If no address is found, return fallback.
-    :param fatal (boolean): If no address is found, fallback is not
-        set and fatal is True then exit(1).
-    """
-    if network is None:
-        if fallback is not None:
-            return fallback
-
-        if fatal:
-            no_ip_found_error_out(network)
-        else:
-            return None
-
-    _validate_cidr(network)
-    network = netaddr.IPNetwork(network)
-    for iface in netifaces.interfaces():
-        addresses = netifaces.ifaddresses(iface)
-        if network.version == 4 and netifaces.AF_INET in addresses:
-            addr = addresses[netifaces.AF_INET][0]['addr']
-            netmask = addresses[netifaces.AF_INET][0]['netmask']
-            cidr = netaddr.IPNetwork("%s/%s" % (addr, netmask))
-            if cidr in network:
-                return str(cidr.ip)
-
-        if network.version == 6 and netifaces.AF_INET6 in addresses:
-            for addr in addresses[netifaces.AF_INET6]:
-                if not addr['addr'].startswith('fe80'):
-                    cidr = netaddr.IPNetwork("%s/%s" % (addr['addr'],
-                                                        addr['netmask']))
-                    if cidr in network:
-                        return str(cidr.ip)
-
-    if fallback is not None:
-        return fallback
-
-    if fatal:
-        no_ip_found_error_out(network)
-
-    return None
-
-
-@cached
-def get_public_addr():
-    return get_address_in_network(config('ceph-public-network'),
-                                  fallback=get_host_ip())
-
-
-def get_mon_hosts():
-    hosts = []
-    addr = get_public_addr()
-    hosts.append('{}:6789'.format(addr))
-
-    for relation_id in relation_ids('mon'):
-        log("Relation id: " + relation_id)
-        for unit in related_units(relation_id):
-            addr = relation_get('ceph-public-address', unit, relation_id)
-            if addr is not None:
-                hosts.append('{}:6789'.format(addr))
-
-    hosts.sort()
-    return hosts
-
-
-def get_keyring(client_type, client_id):
-    """
-    Asks the monitor for a key.  Doesn't rely on key files
-    :param client_type: Class CephClientType
-    :param client_id: str
-    :return: str
-    """
-    try:
-        cmd = ['ceph', 'auth', 'get', client_type + '.' + client_id]
-        out = subprocess.check_output(cmd).decode('UTF-8')
-        return out
-    except subprocess.CalledProcessError:
-        return None
-
-
 def save_keyring(client_type, client_id):
     """
     :param client_type: Class CephClientType
     :param client_id: str
     :return: None
     """
+    file_name = '/etc/ceph/ceph.' + client_type + '.' + client_id + '.keyring'
     key = relation_get('dashboard_key')
-    log('Writing out keyring file /etc/ceph/ceph.' + client_type + '.' + client_id + '.keyring')
-    log("dashboard key: " + key)
-    with open('/etc/ceph/ceph.' + client_type + '.' + client_id + '.keyring', 'w+') as keyfile:
-        keyfile.write('[' + client_type + '.' + client_id + ']\n')
+    log('Writing out keyring file: ' + file_name)
+    if key is not None:
+        log("dashboard key: " + key)
+    else:
+        log("dashboard key not found")
+    with open(file_name, 'w+') as key_file:
+        key_file.write('[' + client_type + '.' + client_id + ']\n')
         if key is not None:
-            keyfile.write('\tkey=' + key)
+            key_file.write('\tkey=' + key + '\n')
         else:
             log("Unable to find dashboard key from Ceph")
 
 
-def emit_cephconf():
-    # This seems to not be getting any real values
+# Generate the config file so ceph-dash.py can connect to Ceph properly
+def emit_dashboard_json_file(client_type, client_id):
+    """
+
+    :param client_type: Class CephClientType
+    :param client_id: str
+    :return: None
+    """
+    log("Generating config.json file for ceph-dash client.")
+    keyring = '/etc/ceph/ceph.' + client_type + '.' + client_id + '.keyring'
+    config_context = {
+        'ceph_config': '/etc/ceph/ceph.conf',
+        'keyring': keyring,
+        'client_id': client_id
+    }
+    log("Writing config.json to: /opt/ceph-dash/config.json")
+    with open('/opt/ceph-dash/config.json', 'w+') as json_file:
+        json.dump(config_context, json_file)
+
+
+def emit_ceph_conf():
     auth = relation_get('auth')
-    public_address = relation_get('ceph-public-address')
+    mon_hosts = relation_get('mon_hosts')
     fsid = relation_get('fsid')
 
     ceph_context = {
         'auth_supported': auth,
         'fsid': fsid,
         'old_auth': cmp_pkgrevno('ceph-common', "0.51") < 0,
-        'ceph_public_network': public_address,
+        'mon_hosts': mon_hosts,
     }
     log("Ceph context: " + str(ceph_context))
 
@@ -200,8 +102,9 @@ def emit_cephconf():
 
 if __name__ == '__main__':
     try:
-        emit_cephconf()
+        emit_ceph_conf()
         save_keyring(CephClientType.client, service_name())
+        emit_dashboard_json_file(CephClientType.client, service_name())
 
         # Ok we have our conf file and keyring.  Call start
         subprocess.Popen("$CHARM_DIR/hooks/start", shell=True)
