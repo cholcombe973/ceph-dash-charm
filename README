@@ -7,6 +7,8 @@ This is a small and clean approach of providing the Ceph overall cluster health 
 Step by step instructions on using the charm:
 
     juju deploy ceph-dash
+    juju add-relation ceph-dash ceph
+    juju expose ceph-dash
 
 You can then browse to http://ip-address to configure the service.
 
