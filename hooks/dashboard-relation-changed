@@ -12,13 +12,13 @@ import subprocess
 from charmhelpers.core.hookenv import (
     log,
     relation_get,
-    service_name,
-    UnregisteredHookError)
+    UnregisteredHookError, status_set)
 from charmhelpers.core.host import (
     cmp_pkgrevno
 )
 from charmhelpers.core.templating import render
 from enum import Enum
+import sys
 
 
 class CephClientType(Enum):
@@ -50,17 +50,18 @@ def save_keyring(client_type, client_id):
     """
     file_name = '/etc/ceph/ceph.' + client_type + '.' + client_id + '.keyring'
     key = relation_get('dashboard_key')
-    log('Writing out keyring file: ' + file_name)
+    status_set('maintenance', 'Writing out keyring file: ' + file_name)
     if key is not None:
         log("dashboard key: " + key)
     else:
         log("dashboard key not found")
+        sys.exit(-1)  # panic
     with open(file_name, 'w+') as key_file:
         key_file.write('[' + client_type + '.' + client_id + ']\n')
         if key is not None:
             key_file.write('\tkey=' + key + '\n')
         else:
-            log("Unable to find dashboard key from Ceph")
+            status_set('blocked', "Unable to find dashboard key from Ceph")
 
 
 # Generate the config file so ceph-dash.py can connect to Ceph properly
@@ -71,22 +72,43 @@ def emit_dashboard_json_file(client_type, client_id):
     :param client_id: str
     :return: None
     """
-    log("Generating config.json file for ceph-dash client.")
+    status_set('active', "Generating config.json file for ceph-dash client.")
     keyring = '/etc/ceph/ceph.' + client_type + '.' + client_id + '.keyring'
     config_context = {
         'ceph_config': '/etc/ceph/ceph.conf',
         'keyring': keyring,
         'client_id': client_id
     }
-    log("Writing config.json to: /opt/ceph-dash/config.json")
+    status_set('active', "Writing config.json to: /opt/ceph-dash/config.json")
     with open('/opt/ceph-dash/config.json', 'w+') as json_file:
         json.dump(config_context, json_file)
 
 
-def emit_ceph_conf():
+def poll_ceph():
     auth = relation_get('auth')
+    if auth is None:
+        status_set('maintenance', 'Waiting on Ceph auth info')
+        sys.exit(0)
+
     mon_hosts = relation_get('mon_hosts')
+    if mon_hosts is None:
+        status_set('maintenance', 'Waiting on Ceph mon_hosts')
+        sys.exit(0)
+
     fsid = relation_get('fsid')
+    if fsid is None:
+        status_set('maintenance', 'Waiting on Ceph FSID')
+        sys.exit(0)
+
+    return auth, mon_hosts, fsid
+
+
+def emit_ceph_conf():
+    (auth, mon_hosts, fsid) = poll_ceph()
+
+    if (auth is None) or (mon_hosts is None) or (fsid is None):
+        status_set('blocked', 'Unable to get some Ceph information. Is the ceph charm broken?')
+        sys.exit(-1)
 
     ceph_context = {
         'auth_supported': auth,
@@ -96,17 +118,18 @@ def emit_ceph_conf():
     }
     log("Ceph context: " + str(ceph_context))
 
-    log("Creating ceph.conf file")
+    status_set('maintenance', "Creating ceph.conf file")
     render('ceph.conf', '/etc/ceph/ceph.conf', ceph_context, perms=0o644)
 
 
 if __name__ == '__main__':
     try:
         emit_ceph_conf()
-        save_keyring(CephClientType.client, service_name())
-        emit_dashboard_json_file(CephClientType.client, service_name())
+        save_keyring(CephClientType.client, "dashboard")
+        emit_dashboard_json_file(CephClientType.client, "dashboard")
 
         # Ok we have our conf file and keyring.  Call start
         subprocess.Popen("$CHARM_DIR/hooks/start", shell=True)
+        status_set('active', '')
     except UnregisteredHookError as e:
         log('Unknown hook {} - skipping.'.format(e))
